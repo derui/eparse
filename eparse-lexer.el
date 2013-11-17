@@ -44,14 +44,12 @@
 ;; 
 ;;; Code:
 
-(defun eplex:char (input)
-  "A parser function to read only a character from input.
-Reading character from input is from position in the argument."
-  (let ((pos (eplib:position-of-input input))
-        (text (eplib:text-of-input input)))
-    (list (substring text pos (1+ pos))
-          (1+ pos)
-          text
-    ))) 
+(require 'eparse-base)
+
+(eplib:define-lexer
+ char
+ (let ((pos (eplib:position-of-input input))
+       (text (eplib:text-of-input input)))
+   (eplib:success input 1)))
 
 (provide 'eparse-lexer)
