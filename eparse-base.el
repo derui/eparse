@@ -77,6 +77,50 @@ If you use it that is returned this funciton, any lexer with fail."
         (and (eq 'fail (car pred))
              (consp pred)))))
 
+(defun eplib:pos-init (&optional position)
+  "Get initialized source position which is point of the document while parsing.
+If position is nil, return position that is start of the document which column 0 and line 0.
+You can send argument as assosiate list which having 'col and 'line key."
+  (if (and position
+           (listp position))
+      (let* ((col (when (assoc 'col position)
+                   (cdr (assoc 'col position))))
+             (line (when (assoc 'line position)
+                     (cdr (assoc 'line position))))
+             (col (if (numberp col) col 0))
+             (line (if (numberp line) line 0)))
+        (list col line))
+    '(0 0)))
+
+(defun eplib:pos-col (pos)
+  "Get current column in the given position at the document.
+If given argument is not valid position or illegal column, return -1 as error"
+  (cond ((and pos (listp pos) (numberp (car pos)))
+         (car pos))
+        (t
+         -1)))
+
+(defun eplib:pos-line (pos)
+  "Get current line in the given position at the document.
+If given argument is not valid position or illegal line, return -1 as error"
+  (cond ((and pos (listp pos) (numberp (cadr pos)))
+         (cadr pos))
+        (t -1)))
+
+(defun eplib:pos-update (pos newer)
+  "Return new position with newer column and line which are updating explicitly as
+associate list. Original position is not updating with destructive."
+  (if (and pos newer (listp newer))
+      (let* ((col (car pos))
+             (line (cadr pos))
+             (new-col (and (numberp (cdr (assoc 'col newer)))
+                           (cdr (assoc 'col newer))))
+             (new-line (and (numberp (cdr (assoc 'line newer)))
+                            (cdr (assoc 'line newer)))))
+        (list (if new-col new-col col)
+              (if new-line new-line line)))
+    pos))
+
 (defun eplib:either (pred next-func)
   "Return new function to execute given function if pred is failed or successful.
 Executing function which is one of function in arguments is took `input' structure,
