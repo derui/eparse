@@ -166,6 +166,21 @@ Note, this function no any effect to `source'. You have to use `eplib:pos-update
           (substring (eplib:source-text source) abs-pos (+ abs-pos readsize)))
       "")))
 
+(defun eplib:either (pred next-func)
+  "Return new function to execute given function if pred is failed or successful.
+Executing function which is one of function in arguments is took `source' structure,
+and expecting it return structure made by `eplib:success' or `eplib:fail'
+If execute function returned with eplib:fail, it return a list equal returning from `eplib:fail'."
+  (cond ((and (eplib:successp pred)
+              (functionp next-func))
+         next-func)
+        ((and (eplib:failp pred)
+              #'(lambda () pred))
+         (t
+          (throw 'illegal-either-type "Given object is not some either type"))
+         ))
+  )
+
 (defmacro eplib:define-lexer (name argname &rest body)
   "Define lexer with some features. This macro wrap some function to lexer that is
 execute in expanded macro. The body given this macro have to use eplib:fail and eplib:success form that are
@@ -174,51 +189,64 @@ The body must be ended with fail or success with source or data.
 
 This macro provide some utility functions follows to make DSL to define lexer.
 
-(<<- size) : Read string from source with size, this is alias for eplib:read-from-source.
-(forward-pos pos) : Update position forwarding in the source.
-(success result) : this is alias for eplib:success.
-(fail result) : this is alias for eplib:fail.
+<<- size : Read string from source with size, this is alias for eplib:read-from-source.
+forward-pos pos : Update position forwarding in the source.
+success result : this is alias for eplib:success.
+fail result : this is alias for eplib:fail.
 "
   (let (ret)
-  `(defun ,(intern (concat "eplib:lexer:" (symbol-name name))) (,argname)
-     (cl-flet ((<<- (size)
-                    (let* ((pos (eplib:source-pos ,argname))
-                           (abs-pos (eplib:pos-position pos)))
-                      (eplib:read-from-source ,argname size)))
-               (forward-pos (size)
-                            (let* ((pos (eplib:source-pos ,argname))
-                                   (abs-pos (eplib:pos-position pos)))
-                              (setq ,argname
-                                   (eplib:update-source ,argname
-                                                        (eplib:update-pos pos (+ abs-pos size))))))
-               (success (result) (eplib:success ,argname result))
-               (fail (result) (eplib:fail result))
-               )
-       (setq ret ,@body)
-       (if (or (eplib:failp ret) (eplib:successp ret))
-           ret
-         (error "What lexer return success or fail have to behave given body"))
-       ))))
+    `(defun ,(intern (concat "eplib:lexer:" (symbol-name name))) (,argname)
+       (cl-flet ((<<- (size)
+                      (let* ((pos (eplib:source-pos ,argname))
+                             (abs-pos (eplib:pos-position pos)))
+                        (eplib:read-from-source ,argname size)))
+                 (forward-pos (size)
+                              (let* ((pos (eplib:source-pos ,argname))
+                                     (abs-pos (eplib:pos-position pos)))
+                                (setq ,argname
+                                      (eplib:update-source ,argname
+                                                           (eplib:update-pos pos (+ abs-pos size))))))
+                 (success (result) (eplib:success ,argname result))
+                 (fail (result) (eplib:fail result))
+                 )
+         (setq ret ,@body)
+         (if (or (eplib:failp ret) (eplib:successp ret))
+             ret
+           (error "What lexer return success or fail have to behave given body"))
+         ))))
 
-(defmacro eplib:lex (name source)
-  `(,(intern (concat "eplib:lexer:" (symbol-name name))) ,source))
+(defmacro eplib:lex (&rest body)
+  "Make new lexer with some lexers are defined by `eplib:define-lexer' macro.
+This macro is the DSL to define it, then some functions already defined and provide in only this macro.
+That are follows.
 
-(defun eplib:either (pred next-func)
-  "Return new function to execute given function if pred is failed or successful.
-Executing function which is one of function in arguments is took `source' structure,
-and expecting it return structure made by `eplib:success' or `eplib:fail'
-If execute function returned with eplib:fail, it return a list equal returning from `eplib:fail'."
-  (if (eplib:eitherp pred)
-      (let ((tag (car pred)))
-        (cond ((and (eq tag 'success)
-                    (functionp next-func))
-               next-func)
-              ((eq tag 'fail)
-               #'(lambda () pred))
-              (t
-               (throw 'illegal-either-type "Given object is not some either type"))
-              ))
-    (throw 'not-either-type "Tag is not made from eplib:success or eplib:fail")))
+<- lexer  : Execute some lexer with previous source.
+"
+  `(lambda (source)
+     (let ((source (eplib:success source "")))
+       (cl-flet ((<- (lexer)
+                     (cl-letf ((lexer (intern (concat "eplib:lexer:" (symbol-name lexer)))))
+                       (cond ((eplib:successp source)
+                              (cl-letf ((f (eplib:either source lexer)))
+                                (let ((ret (funcall f (eplib:pull-source source))))
+                                  (cond ((eplib:successp ret)
+                                         (setq source ret)
+                                         (eplib:success-val ret))
+                                        ((eplib:failp ret)
+                                         (setq source ret)
+                                         (eplib:fail-val ret))))))
+                             ((eplib:failp source)
+                              (eplib:fail-val source))))
+                     )
+                 (success (result) (eplib:success source result))
+                 (fail (result) (eplib:fail result))
+                 )
+         (let ((ret ,@body))
+           (cond ((eplib:successp ret)
+                  (eplib:success-val ret))
+                 ((eplib:failp ret)
+                  (eplib:fail-val ret)))))
+       )))
 
 (defun eplib:bind (fst snd)
   "Return new function what combine `fst' to `snd'.
