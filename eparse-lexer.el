@@ -46,10 +46,25 @@
 
 (require 'eparse-base)
 
-(eplib:define-lexer
- char
- (let ((pos (eplib:position-of-input input))
-       (text (eplib:text-of-input input)))
-   (eplib:success input 1)))
+(eplib:define-lexer char source character
+                    (let (ch
+                          (target (cond ((characterp (car character))
+                                         (car character))
+                                        ((stringp (car character))
+                                         (string-to-char (car character)))
+                                        (t
+                                         nil))))
+                      (setq ch (<<- 1))
+                      (if (eql (string-to-char ch) target)
+                          (progn
+                            (forward-pos 1)
+                            (success ch))
+                        (fail "no much character"))))
+
+(eplib:define-lexer any-char source any
+                    (let (ch)
+                      (setq ch (<<- 1))
+                      (forward-pos 1)
+                      (success ch)))
 
 (provide 'eparse-lexer)

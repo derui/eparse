@@ -46,6 +46,14 @@
 
 (require 'cl-lib)
 
+(defvar eplib:eof nil
+  "A error raised when more read from empty input.")
+
+(put 'eplib:eof
+     'error-conditions
+     '(error eplib:error eplib:eof))
+(put 'eplib:eof 'error-message "Expect some input")
+
 ;; Definitions for functions are support to parse and lex.
 (defun eplib:successp (v)
   "Check the value if it equal a type of success"
@@ -156,14 +164,18 @@ associate list. Original position is not updating with destructive."
 (defun eplib:read-from-source (source readsize)
   "Read text start from current position of the source to readsize.
 Note, this function no any effect to `source'. You have to use `eplib:pos-update' and
-`eplib:replace-source-pos' if you want to read to read continuous."
+`eplib:replace-source-pos' if you want to read to read continuous.
+When having empty text in source read some size, this function signal `eplib:eof'."
   (when (eplib:sourcep source)
     (if (and readsize
              (numberp readsize)
              (<= 0 readsize))
         (let* ((pos (eplib:source-pos source))
                (abs-pos (eplib:pos-position pos)))
-          (substring (eplib:source-text source) abs-pos (+ abs-pos readsize)))
+          (cond ((<= (length (eplib:source-text source)) abs-pos)
+                 (signal 'eplib:eof nil))
+                (t
+                 (substring (eplib:source-text source) abs-pos (+ abs-pos readsize)))))
       "")))
 
 (defun eplib:either (pred next-func)
@@ -181,7 +193,7 @@ If execute function returned with eplib:fail, it return a list equal returning f
          ))
   )
 
-(defmacro eplib:define-lexer (name argname &rest body)
+(defmacro eplib:define-lexer (name argname restname &rest body)
   "Define lexer with some features. This macro wrap some function to lexer that is
 execute in expanded macro. The body given this macro have to use eplib:fail and eplib:success form that are
 used to fail or success lex. In the body can use a variable `source' that initialized by eplib:make-source to lex.
@@ -194,8 +206,8 @@ forward-pos pos : Update position forwarding in the source.
 success result : this is alias for eplib:success.
 fail result : this is alias for eplib:fail.
 "
-  (let (ret)
-    `(defun ,(intern (concat "eplib:lexer:" (symbol-name name))) (,argname)
+  (let (ret rest)
+    `(defun ,(intern (concat "eplib:lexer:" (symbol-name name))) (,argname &rest ,restname)
        (cl-flet ((<<- (size)
                       (let* ((pos (eplib:source-pos ,argname))
                              (abs-pos (eplib:pos-position pos)))
@@ -209,11 +221,44 @@ fail result : this is alias for eplib:fail.
                  (success (result) (eplib:success ,argname result))
                  (fail (result) (eplib:fail result))
                  )
-         (setq ret ,@body)
+         (condition-case err
+             (setq ret ,@body)
+           (eplib:eof
+            (setq ret (eplib:fail (error-message-string err)))))
          (if (or (eplib:failp ret) (eplib:successp ret))
              ret
            (error "What lexer return success or fail have to behave given body"))
          ))))
+
+(defmacro eplib:define-combinator (name arglist &rest body)
+  "Define combinator to be used in `eplib:lex'. The combinator that defined by this macro
+define global function, and provide some useful functions as utility."
+
+  `(defun ,(intern (concat "eplib:combinator:" (symbol-name name))) (source)
+     (let ((source (eplib:success source "")))
+       (lambda ,arglist
+         (cl-flet ((<- (lexer &rest arg)
+                       (let* ((f (intern (concat "eplib:lexer:" (symbol-name lexer)))))
+                         (cond ((eplib:successp source)
+                                (let* ((f (eplib:either source f))
+                                       (ret (apply f (append (list (eplib:pull-source source)) arg))))
+                                  (cond ((eplib:successp ret)
+                                         (setq source ret)
+                                         (eplib:success-val ret))
+                                        ((eplib:successp ret)
+                                         (setq source ret)
+                                         (eplib:fail-val ret)))))
+                               ((eplib:failp source)
+                                (eplib:fail-val source))))
+                       )
+                   (success (result) (eplib:success source result))
+                   (fail (result) (eplib:fail result))
+                   )
+           (let ((ret ,@body))
+             (when (or (eplib:successp ret) (eplib:failp ret))
+               ret))
+           ))
+         )))
 
 (defmacro eplib:lex (&rest body)
   "Make new lexer with some lexers are defined by `eplib:define-lexer' macro.
@@ -221,14 +266,16 @@ This macro is the DSL to define it, then some functions already defined and prov
 That are follows.
 
 <- lexer  : Execute some lexer with previous source.
+success value : Return successful value.
+fail value : Return failure value.
 "
   `(lambda (source)
      (let ((source (eplib:success source "")))
-       (cl-flet ((<- (lexer)
+       (cl-flet ((<- (lexer &rest arg)
                      (cl-letf ((lexer (intern (concat "eplib:lexer:" (symbol-name lexer)))))
                        (cond ((eplib:successp source)
                               (cl-letf ((f (eplib:either source lexer)))
-                                (let ((ret (funcall f (eplib:pull-source source))))
+                                (let ((ret (funcall f (eplib:pull-source source) (car arg))))
                                   (cond ((eplib:successp ret)
                                          (setq source ret)
                                          (eplib:success-val ret))
@@ -238,6 +285,16 @@ That are follows.
                              ((eplib:failp source)
                               (eplib:fail-val source))))
                      )
+                 (<$> (combinator &rest args)
+                      (let* ((combinator (intern (concat "eplib:combinator:" (symbol-name combinator))))
+                             (f (funcall combinator (eplib:pull-source source))))
+                        (let ((ret (apply f args)))
+                          (cond ((eplib:successp ret)
+                                 (setq source ret)
+                                 (eplib:success-val ret))
+                                ((eplib:failp ret)
+                                 (setq source ret)
+                                 (eplib:fail-val ret))))))
                  (success (result) (eplib:success source result))
                  (fail (result) (eplib:fail result))
                  )

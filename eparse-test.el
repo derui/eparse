@@ -52,6 +52,11 @@
         (let ((input (eplib:make-source "test")))
           (list (eplib:read-from-source input 1)
                 (eplib:read-from-source input 1))))
+      (desc "空文字列から読出した時にはエラーが発生する")
+      (expect t
+              (condition-case foo
+                  (eplib:read-from-source (eplib:make-source "") 1)
+                (eplib:eof t)))
 
       (desc "成功の場合の返却値")
       (expect '(success 1)
@@ -88,46 +93,39 @@
 
       (desc "lexer作成用のマクロ")
       (expect '(t "a" "a" 1)
-        (eplib:define-lexer char source
+        (eplib:define-lexer test source rest
                             (let (ch)
                               (setq ch (<<- 1))
                               (forward-pos 1)
                               (success ch)))
-        (let ((ret (eplib:lexer:char (eplib:make-source "a"))))
+        (let ((ret (eplib:lexer:test (eplib:make-source "a"))))
           (list (eplib:successp ret)
                 (eplib:success-val ret)
                 (eplib:source-text (eplib:pull-source ret))
                 (eplib:pos-position (eplib:source-pos (eplib:pull-source ret))))))
-      (expect '(t "a")
-        (eplib:define-lexer char source
-                            (let (ch)
-                              (setq ch (<<- 1))
-                              (fail ch)))
-        (let ((ret (eplib:lexer:char (eplib:make-source "a"))))
-          (list (eplib:failp ret)
-                (eplib:fail-val ret))))
-      (expect t
-        (eplib:define-lexer char source
-                            (let (ch)
-                              (setq ch (<<- 1))
-                              ch))
-        (condition-case nil
-            (eplib:lexer:char (eplib:make-source "aa"))
-          (error t)))
-
       (desc "lexerの結合を行なうためのマクロ")
       (expect "a s"
-        (eplib:define-lexer char source
-                            (let (ch)
-                              (setq ch (<<- 1))
-                              (forward-pos 1)
-                              (success ch)))
         (cl-letf ((lex (eplib:lex
                     (let (ch)
-                      (setq ch (<- 'char))
-                      (setq ch (concat ch " " (<- 'char)))
+                      (setq ch (<- 'any-char))
+                      (setq ch (concat ch " " (<- 'char ?s)))
                       (success ch)))))
           (funcall lex (eplib:make-source "as"))))
+      (desc "lexer内でエラーが発生したらfailになる")
+      (expect t
+        (eplib:failp (eplib:lexer:char (eplib:make-source "") ?a)))
+      (desc "パーサ内で利用できるコンビネーターを定義できる")
+      (expect "abcd"
+              (eplib:define-combinator test (lexer)
+                                       (let (ch)
+                                         (setq ch (<- lexer))
+                                         (setq ch (concat ch (<- lexer)))
+                                         (setq ch (concat ch (<- lexer)))
+                                         (setq ch (concat ch (<- lexer)))
+                                         (success ch)))
+              (funcall (eplib:lex
+                        (success (<$> 'test 'any-char)))
+                       (eplib:make-source "abcd")))
       )))
 
 (ert-run-tests-batch-and-exit)
