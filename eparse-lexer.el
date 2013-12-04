@@ -44,7 +44,7 @@
 ;; 
 ;;; Code:
 
-(require 'eparse-base)
+(eval-when-compile (require 'eparse-base))
 
 (eplib:define-lexer char source character
                     (let (ch
@@ -66,5 +66,15 @@
                       (setq ch (<<- 1))
                       (forward-pos 1)
                       (success ch)))
+
+(eplib:define-combinator many lexer nil
+                         (let ((ret '()))
+                           (condition-case exception
+                               (while (successp)
+                                 (let ((r (<- lexer)))
+                                   (setq ret (cons r ret))))
+                             (eplib:eof ret)
+                             (eplib:raise-fail ret))
+                           (success (reverse ret))))
 
 (provide 'eparse-lexer)

@@ -54,9 +54,9 @@
                 (eplib:read-from-source input 1))))
       (desc "空文字列から読出した時にはエラーが発生する")
       (expect t
-              (condition-case foo
-                  (eplib:read-from-source (eplib:make-source "") 1)
-                (eplib:eof t)))
+        (condition-case foo
+            (eplib:read-from-source (eplib:make-source "") 1)
+          (eplib:eof t)))
 
       (desc "成功の場合の返却値")
       (expect '(success 1)
@@ -75,22 +75,6 @@
       (expect t (eplib:failp (eplib:fail "message")))
       (expect "message" (eplib:fail-val (eplib:fail "message")))
 
-      (desc "関数同士の合成")
-      (expect "te"
-        (let ((f (eplib:bind #'(lambda (arg) (concat arg "t"))
-                             #'(lambda (arg) (concat arg "e")))))
-          (funcall f "")))
-      (expect '(t "hoge")
-        (let ((f (eplib:bind #'(lambda (arg) (concat arg "t"))
-                             nil)))
-          (list (eq 'identity f)
-                (funcall f "hoge"))))
-      (expect '(t "hoge")
-        (let ((f (eplib:bind nil
-                             #'(lambda (arg) (concat arg "t")))))
-          (list (eq 'identity f)
-                (funcall f "hoge"))))
-
       (desc "lexer作成用のマクロ")
       (expect '(t "a" "a" 1)
         (eplib:define-lexer test source rest
@@ -106,26 +90,52 @@
       (desc "lexerの結合を行なうためのマクロ")
       (expect "a s"
         (cl-letf ((lex (eplib:lex
-                    (let (ch)
-                      (setq ch (<- 'any-char))
-                      (setq ch (concat ch " " (<- 'char ?s)))
-                      (success ch)))))
+                        (let (ch)
+                          (setq ch (<- 'any-char))
+                          (setq ch (concat ch " " (<- 'char ?s)))
+                          (success ch)))))
           (funcall lex (eplib:make-source "as"))))
       (desc "lexer内でエラーが発生したらfailになる")
       (expect t
         (eplib:failp (eplib:lexer:char (eplib:make-source "") ?a)))
+      (expect t
+        (eplib:failp
+         (funcall (eplib:lex
+                   (let (ch)
+                     (setq ch (<- 'char ?a))
+                     (setq ch (<- 'char ?s))
+                     (success ch)))
+                  (eplib:make-source "s"))))
       (desc "パーサ内で利用できるコンビネーターを定義できる")
       (expect "abcd"
-              (eplib:define-combinator test (lexer)
-                                       (let (ch)
-                                         (setq ch (<- lexer))
-                                         (setq ch (concat ch (<- lexer)))
-                                         (setq ch (concat ch (<- lexer)))
-                                         (setq ch (concat ch (<- lexer)))
-                                         (success ch)))
-              (funcall (eplib:lex
-                        (success (<$> 'test 'any-char)))
-                       (eplib:make-source "abcd")))
+        (eplib:define-combinator test lexer ()
+                                 (let (ch)
+                                   (setq ch (<- lexer))
+                                   (setq ch (concat ch (<- lexer)))
+                                   (setq ch (concat ch (<- lexer)))
+                                   (setq ch (concat ch (<- lexer)))
+                                   (success ch)))
+        (funcall (eplib:lex
+                  (success (<$> 'test 'any-char)))
+                 (eplib:make-source "abcd")))
+      (expect "aa"
+        (eplib:define-combinator test lexer ()
+                                 (let (ch)
+                                   (setq ch (<- lexer))
+                                   (setq ch (concat ch (<- lexer)))
+                                   (success ch)))
+        (funcall (eplib:lex
+                  (success (<$> 'test 'char ?a)))
+                 (eplib:make-source "aacd")))
+      (desc "できるだけ多くマッチするコンビネータ")
+      (expect '("a" "b" "c" "d" "e" "f" "g")
+        (funcall (eplib:lex
+                  (success (<$> 'many 'any-char)))
+                 (eplib:make-source "abcdefg")))
+      (expect '("a" "a" "a")            ;
+        (funcall (eplib:lex
+                  (success (<$> 'many 'char ?a)))
+                 (eplib:make-source "aaadefg")))
       )))
 
 (ert-run-tests-batch-and-exit)

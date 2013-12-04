@@ -48,11 +48,18 @@
 
 (defvar eplib:eof nil
   "A error raised when more read from empty input.")
+(defvar eplib:raise-fail nil
+  "A error raised when any lexer or combinator meets `fail'.")
 
 (put 'eplib:eof
      'error-conditions
      '(error eplib:error eplib:eof))
 (put 'eplib:eof 'error-message "Expect some input")
+
+(put 'eplib:raise-fail
+     'error-conditions
+     '(error eplib:error eplib:raise-fail))
+(put 'eplib:raise-fail 'error-message "Get failure from someone")
 
 ;; Definitions for functions are support to parse and lex.
 (defun eplib:successp (v)
@@ -187,11 +194,11 @@ If execute function returned with eplib:fail, it return a list equal returning f
               (functionp next-func))
          next-func)
         ((and (eplib:failp pred)
-              #'(lambda () pred))
-         (t
-          (throw 'illegal-either-type "Given object is not some either type"))
-         ))
-  )
+              #'(lambda () pred)))
+        (t
+         (throw 'illegal-either-type "Given object is not some either type"))
+        ))
+
 
 (defmacro eplib:define-lexer (name argname restname &rest body)
   "Define lexer with some features. This macro wrap some function to lexer that is
@@ -230,14 +237,14 @@ fail result : this is alias for eplib:fail.
            (error "What lexer return success or fail have to behave given body"))
          ))))
 
-(defmacro eplib:define-combinator (name arglist &rest body)
+(defmacro eplib:define-combinator (name lexername arglist &rest body)
   "Define combinator to be used in `eplib:lex'. The combinator that defined by this macro
 define global function, and provide some useful functions as utility."
 
   `(defun ,(intern (concat "eplib:combinator:" (symbol-name name))) (source)
      (let ((source (eplib:success source "")))
-       (lambda ,arglist
-         (cl-flet ((<- (lexer &rest arg)
+       (lambda ,(append (list lexername) arglist (list '&rest 'arg))
+         (cl-flet ((<- (lexer)
                        (let* ((f (intern (concat "eplib:lexer:" (symbol-name lexer)))))
                          (cond ((eplib:successp source)
                                 (let* ((f (eplib:either source f))
@@ -245,14 +252,15 @@ define global function, and provide some useful functions as utility."
                                   (cond ((eplib:successp ret)
                                          (setq source ret)
                                          (eplib:success-val ret))
-                                        ((eplib:successp ret)
-                                         (setq source ret)
-                                         (eplib:fail-val ret)))))
+                                        ((eplib:failp ret)
+                                         (signal 'eplib:raise-fail source)))))
                                ((eplib:failp source)
                                 (eplib:fail-val source))))
                        )
                    (success (result) (eplib:success source result))
                    (fail (result) (eplib:fail result))
+                   (successp () (eplib:successp source))
+                   (failp () (eplib:failp source))
                    )
            (let ((ret ,@body))
              (when (or (eplib:successp ret) (eplib:failp ret))
@@ -280,10 +288,10 @@ fail value : Return failure value.
                                          (setq source ret)
                                          (eplib:success-val ret))
                                         ((eplib:failp ret)
-                                         (setq source ret)
-                                         (eplib:fail-val ret))))))
+                                         (signal 'eplib:raise-fail ret))
+                                        ))))
                              ((eplib:failp source)
-                              (eplib:fail-val source))))
+                              (signal 'eplib:raise-fail source))))
                      )
                  (<$> (combinator &rest args)
                       (let* ((combinator (intern (concat "eplib:combinator:" (symbol-name combinator))))
@@ -293,26 +301,17 @@ fail value : Return failure value.
                                  (setq source ret)
                                  (eplib:success-val ret))
                                 ((eplib:failp ret)
-                                 (setq source ret)
-                                 (eplib:fail-val ret))))))
+                                 (signal 'eplib:raise-fail source))))))
                  (success (result) (eplib:success source result))
                  (fail (result) (eplib:fail result))
                  )
-         (let ((ret ,@body))
-           (cond ((eplib:successp ret)
-                  (eplib:success-val ret))
-                 ((eplib:failp ret)
-                  (eplib:fail-val ret)))))
+         (condition-case err
+             (let ((ret ,@body))
+               (cond ((eplib:successp ret)
+                      (eplib:success-val ret))
+                     ((eplib:failp ret)
+                      (eplib:fail-val ret))))
+           (eplib:raise-fail (eplib:fail (error-message-string err)))))
        )))
-
-(defun eplib:bind (fst snd)
-  "Return new function what combine `fst' to `snd'.
-Notice, arguments of this function has to be able to give only one argument, because
-the result of `fst' executed take to argument of `snd' without change.
-If without function or other give this, return id function that is defined `identity'"
-  (if (and (functionp fst) (functionp snd))
-      #'(lambda (arg)
-          (funcall snd (funcall fst arg)))
-    'identity))
 
 (provide 'eparse-base)
