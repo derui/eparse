@@ -51,6 +51,7 @@
 (defvar eplib:raise-fail nil
   "A error raised when any lexer or combinator meets `fail'.")
 
+;; Define error conditions.
 (put 'eplib:eof
      'error-conditions
      '(error eplib:error eplib:eof))

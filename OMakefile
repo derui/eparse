@@ -32,15 +32,32 @@ if $(not $(EMACS_EXISTS))
 	eprintln(Not found emacs which any executable one)
 	$(exit 1)
 
-.PHONY: test
+.PHONY: test clean
 
 OPTIONS = -L $(absname $(dir .)) -L $(dir $(HOME)/.emacs.d/el-get/ert-expectations)
 
 TARGET_FILES[] =
-	eparse.el
-	eparse-lexer.el
 	eparse-base.el
+	eparse-lexer.el
+	eparse.el
 	eparse-test.el
 
+eparse-base.elc : eparse-base.el
+	$(EMACS) -Q --batch -l bytecomp --eval '(batch-byte-compile-file "eparse-base.el")'
+
+eparse-lexer.elc : eparse-lexer.el eparse-base.elc
+	$(EMACS) -Q --batch -l bytecomp -L . --eval '(batch-byte-compile-file "eparse-lexer.el")'
+
+eparse.elc : eparse.el eparse-lexer.elc
+	$(EMACS) -Q --batch -l bytecomp -L . --eval '(batch-byte-compile-file "eparse.el")'
+
+eparse-test.elc : eparse-test.el eparse.elc
+	$(EMACS) -Q --batch -l bytecomp $(OPTIONS) --eval '(batch-byte-compile-file "eparse-test.el")'
+
+.DEFAULT: $(addsuffix .elc, $(removesuffix $(TARGET_FILES)))
+
 test : $(TARGET_FILES)
-	$(EMACS) -Q --batch $(OPTIONS) -l eparse-test.el
+	$(EMACS) -Q --batch $(OPTIONS) -l eparse-test.elc
+
+clean:
+	rm -f *.elc
